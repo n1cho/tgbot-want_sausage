@@ -6,7 +6,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from db import (
     init_db, get_last_used_time, 
     update_last_used_time, update_sausage_stats,
-    get_statistics
+    get_statistics, get_top_users, get_user_sausages
 )
 from datetime import datetime, timedelta
 
@@ -41,16 +41,34 @@ async def kolbasa(update: Update, context:ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Куда тебе столько! Ты уже свою порцию съел, попробуй снова через {hours:02d}:{minutes:02d}:{seconds:02d}.")
         return
     
-    sausage = random.choice(SAUSAGE_TYPES)
-    quantity = round(random.uniform(0.1, 1.0), 2)
 
-    update_sausage_stats(chat.id, user.id, user.first_name, sausage, quantity)
-    update_last_used_time(chat.id, user.id, now)
+    change = random.random()
 
-    await update.message.reply_text(
+    if change < 0.10:
+        user_sausages = get_user_sausages(chat.id, user.id)
+
+        if not user_sausages:
+            await update.message.reply_text(
+            f"🤢 {user.first_name} отравился, но терять ему нечего."
+        )
+
+        sausage, available_quantity = random.choice(user_sausages)
+        lost = round(random.uniform(0.1, min(available_quantity, 0.5)), 2)
+
+        update_sausage_stats(chat.id, user.id, user.first_name, sausage, -lost)
+        await update.message.reply_text(
+        f"{user.first_name} отравился. Из-за чего потерял {lost} кг *{sausage}* колбасы", parse_mode="Markdown"
+    )
+    else:
+        sausage = random.choice(SAUSAGE_TYPES)
+        quantity = round(random.uniform(0.1, 1.0), 2)
+        update_sausage_stats(chat.id, user.id, user.first_name, sausage, quantity)
+        await update.message.reply_text(
         f"{user.first_name} съел {quantity} кг *{sausage}* колбасы", parse_mode="Markdown"
     )
-    
+
+    update_last_used_time(chat.id, user.id, now)
+
 # Comand /stats
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -68,12 +86,30 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(message, parse_mode="Markdown")
 
+
+# Command /top
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    top_users = get_top_users(chat_id)
+
+    if not top_users:
+        await update.message.reply_text("В этом чате ещё никто не кушал(")
+        return
+
+    message = "Топ поедателей беседы:\n"
+    for i, (username, total) in enumerate(top_users, start=1):
+        message += f"{i}. {username} — {total} кг\n"
+
+    await update.message.reply_text(message, parse_mode="Markdown")
+
 # Start bot
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("kolbasa",kolbasa))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("top", top))
 
     app.run_polling()
 
